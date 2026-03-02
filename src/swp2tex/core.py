@@ -467,7 +467,7 @@ def _normalize_tcilatex_inputs(tex: str) -> tuple[str, list[str]]:
         if stem != "tcilatex":
             return match.group(0)
         fixes.append(f"Removed SWP tcilatex input '{raw}'")
-        return f"% Removed missing SWP input: {raw}"
+        return f"% Removed SWP input: {raw}"
 
     return pattern.sub(repl, tex), fixes
 
