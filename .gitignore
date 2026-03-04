@@ -22,3 +22,7 @@ htmlcov/
 .idea/
 .DS_Store
 Thumbs.db
+
+# Packaging metadata
+*.egg-info/
+pip-wheel-metadata/
