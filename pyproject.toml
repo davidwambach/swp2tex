@@ -12,6 +12,7 @@ dependencies = []
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0"]
+gui-dnd = ["tkinterdnd2>=0.4"]
 
 [project.scripts]
 swp2tex-bib = "swp2tex.cli:main"

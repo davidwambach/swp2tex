@@ -12,6 +12,7 @@ from swp2tex.core import (
     comment_out_missing_includegraphics,
     convert_swp_frames_to_figures,
     normalize_qtr_frametitle,
+    normalize_step_lists,
     normalize_bibliography_commands,
     run_workflow,
 )
@@ -152,6 +153,21 @@ def test_convert_swp_frame_with_tempfilename() -> None:
     assert fixes
 
 
+def test_convert_swp_frame_with_comment_wrapped_figure_placeholder() -> None:
+    src = (
+        "\\FRAME{ftbpFU}{4.124in}{2.3873in}{0pt}"
+        "{\\Qcb{Surplus Share Guarantee as a Function of Elasticity}}"
+        "{\\Qlb{fig:g}}{%\n"
+        "Figure}{\\special{tempfilename '../../aer submission/T5IBWK0B.wmf';type GRAPHIC;}}"
+    )
+    out, fixes = convert_swp_frames_to_figures(src)
+    assert (
+        r"\includegraphics[width=4.124in]{../../aer submission/T5IBWK0B.wmf}" in out
+    )
+    assert r"\includegraphics[width=4.124in]{Figure}" not in out
+    assert fixes
+
+
 def test_convert_swp_frame_label_with_comment_suffix() -> None:
     src = (
         "\\FRAME{ftbpFU}{3.1379in}{2.9761in}{0pt}{\\Qcb{Cap}}{\\Qlb{fig3}%\n}"
@@ -193,12 +209,44 @@ def test_convert_wmf_graphics_to_png_rewrites_reference(
     assert created
 
 
+def test_convert_wmf_graphics_to_png_rewrites_weird_relative_path_by_basename(
+    tmp_path: Path, monkeypatch
+) -> None:
+    (tmp_path / "aersubmission").mkdir()
+    wmf = tmp_path / "aersubmission" / "T5IBWK0A.wmf"
+    wmf.write_text("x", encoding="utf-8")
+
+    def fake_convert(src: Path):
+        src.with_suffix(".png").write_text("png", encoding="utf-8")
+        return True, ""
+
+    monkeypatch.setattr("swp2tex.core._convert_vector_to_png", fake_convert)
+    src = r"\includegraphics{../../aer submission/T5IBWK0A.wmf}"
+    out, fixes, warnings, created = convert_wmf_graphics_to_png(src, tmp_path)
+    assert r"\includegraphics{aersubmission/T5IBWK0A.png}" in out
+    assert fixes
+    assert not warnings
+    assert created
+
+
 def test_comment_out_missing_includegraphics_warns() -> None:
     src = "\\begin{figure}\\n\\includegraphics{missing_figure3.jpg}\\n\\end{figure}\\n"
     out, fixes, warnings = comment_out_missing_includegraphics(src, Path("."))
     assert "%\\includegraphics{missing_figure3.jpg}" in out
     assert fixes
     assert warnings
+
+
+def test_comment_out_missing_includegraphics_keeps_existing_by_basename(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "aersubmission").mkdir()
+    (tmp_path / "aersubmission" / "T5IBWK0A.wmf").write_text("x", encoding="utf-8")
+    src = "\\includegraphics{../../aer submission/T5IBWK0A.wmf}\n"
+    out, fixes, warnings = comment_out_missing_includegraphics(src, tmp_path)
+    assert out == src
+    assert not fixes
+    assert not warnings
 
 
 def test_normalize_qtr_frametitle() -> None:
@@ -211,6 +259,40 @@ def test_normalize_qtr_frametitle() -> None:
 def test_commented_qtr_frametitle_not_converted() -> None:
     src = r"%\QTR{frametitle}{Introduction}"
     out, fixes = normalize_qtr_frametitle(src)
+    assert out == src
+    assert not fixes
+
+
+def test_normalize_stepitemize_to_itemize_with_overlay_items() -> None:
+    src = "\\begin{stepitemize}\n\\item A\n\\item B\n\\end{stepitemize}"
+    out, fixes = normalize_step_lists(src)
+    assert "\\begin{itemize}" in out
+    assert "\\end{itemize}" in out
+    assert "\\item<+-> A" in out
+    assert "\\item<+-> B" in out
+    assert fixes
+
+
+def test_normalize_stepenumerate_to_enumerate_with_overlay_items() -> None:
+    src = "\\begin{stepenumerate}\n\\item 1\n\\item 2\n\\end{stepenumerate}"
+    out, fixes = normalize_step_lists(src)
+    assert "\\begin{enumerate}" in out
+    assert "\\end{enumerate}" in out
+    assert "\\item<+-> 1" in out
+    assert "\\item<+-> 2" in out
+    assert fixes
+
+
+def test_step_list_does_not_modify_existing_item_overlay() -> None:
+    src = "\\begin{stepitemize}\n\\item<2-> Existing\n\\item New\n\\end{stepitemize}"
+    out, _fixes = normalize_step_lists(src)
+    assert "\\item<2-> Existing" in out
+    assert "\\item<+-> New" in out
+
+
+def test_commented_step_list_not_converted() -> None:
+    src = "%\\begin{stepitemize}\n%\\item A\n%\\end{stepitemize}"
+    out, fixes = normalize_step_lists(src)
     assert out == src
     assert not fixes
 

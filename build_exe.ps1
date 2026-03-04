@@ -41,7 +41,7 @@ function Invoke-Step {
 Invoke-Step -Command { & $Python -m pip install pyinstaller } `
     -ErrorMessage "Failed to install pyinstaller."
 
-Invoke-Step -Command { & $Python -m pip install -e . } `
+Invoke-Step -Command { & $Python -m pip install -e ".[gui-dnd]" } `
     -ErrorMessage "Failed to install project dependencies."
 
 Invoke-Step -Command { & $Python -c "import PyInstaller; print('PyInstaller available')" } `

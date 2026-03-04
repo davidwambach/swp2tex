@@ -161,7 +161,7 @@ def _copy_if_exists(src: Path, dst: Path) -> bool:
 
 
 def _resolve_graphics_path(project_dir: Path, raw_path: str) -> Path | None:
-    clean = raw_path.strip()
+    clean = _sanitize_graphics_ref(raw_path).strip().strip("\"'")
     if not clean:
         return None
     p = Path(clean)
@@ -171,11 +171,31 @@ def _resolve_graphics_path(project_dir: Path, raw_path: str) -> Path | None:
     if candidate.exists():
         return candidate
     if p.suffix:
-        return None
+        by_name = _find_graphic_by_name(project_dir, p.name)
+        return by_name
     for suffix in (".png", ".jpg", ".jpeg", ".pdf", ".eps", ".wmf", ".emf"):
         c2 = (project_dir / f"{clean}{suffix}").resolve()
         if c2.exists():
             return c2
+    for suffix in (".png", ".jpg", ".jpeg", ".pdf", ".eps", ".wmf", ".emf"):
+        by_name = _find_graphic_by_name(project_dir, f"{p.name}{suffix}")
+        if by_name is not None:
+            return by_name
+    return None
+
+
+def _find_graphic_by_name(project_dir: Path, filename: str) -> Path | None:
+    if not filename:
+        return None
+    target_lower = filename.lower()
+    try:
+        for candidate in project_dir.rglob("*"):
+            if not candidate.is_file():
+                continue
+            if candidate.name.lower() == target_lower:
+                return candidate.resolve()
+    except OSError:
+        return None
     return None
 
 
@@ -339,6 +359,61 @@ def normalize_qtr_frametitle(tex: str) -> tuple[str, list[str]]:
     return pattern.sub(repl, tex), fixes
 
 
+def normalize_step_lists(tex: str) -> tuple[str, list[str]]:
+    fixes: list[str] = []
+    token_pattern = re.compile(
+        r"\\begin\s*\{(stepitemize|stepenumerate)\}"
+        r"|\\end\s*\{(stepitemize|stepenumerate)\}"
+        r"|\\item\b"
+    )
+    out: list[str] = []
+    env_stack: list[str] = []
+    converted_envs: set[str] = set()
+    item_overlay_count = 0
+    i = 0
+    for match in token_pattern.finditer(tex):
+        start, end = match.span()
+        out.append(tex[i:start])
+        i = end
+        if _is_pos_in_latex_comment(tex, start):
+            out.append(match.group(0))
+            continue
+        begin_name = match.group(1)
+        end_name = match.group(2)
+        token = match.group(0)
+        if begin_name:
+            target = "itemize" if begin_name == "stepitemize" else "enumerate"
+            env_stack.append(target)
+            converted_envs.add(begin_name)
+            out.append(r"\begin{" + target + "}")
+            continue
+        if end_name:
+            target = "itemize" if end_name == "stepitemize" else "enumerate"
+            if env_stack:
+                target = env_stack.pop()
+            out.append(r"\end{" + target + "}")
+            continue
+        if token == r"\item" and env_stack:
+            remainder = tex[end:]
+            if re.match(r"\s*<", remainder):
+                out.append(token)
+                continue
+            item_overlay_count += 1
+            out.append(r"\item<+->")
+            continue
+        out.append(token)
+    out.append(tex[i:])
+    if "stepitemize" in converted_envs:
+        fixes.append("Converted stepitemize to itemize with overlay items.")
+    if "stepenumerate" in converted_envs:
+        fixes.append("Converted stepenumerate to enumerate with overlay items.")
+    if item_overlay_count:
+        fixes.append(
+            f"Added Beamer overlay spec to {item_overlay_count} item(s) in step lists."
+        )
+    return "".join(out), fixes
+
+
 def _strip_wrapper(raw: str, macro_name: str) -> str:
     cleaned = re.sub(r"(?<!\\)%[^\n]*", "", raw).strip()
     pattern = re.compile(rf"\\{macro_name}\s*\{{(.*)\}}", re.DOTALL)
@@ -429,7 +504,7 @@ def convert_swp_frames_to_figures(tex: str) -> tuple[str, list[str]]:
         width = args[1].strip()
         caption = _strip_wrapper(args[4], "Qcb")
         label = _strip_wrapper(args[5], "Qlb")
-        file_arg = args[6].strip()
+        file_arg = _sanitize_graphics_ref(args[6])
         special = args[7]
 
         filename = None
@@ -437,6 +512,8 @@ def convert_swp_frames_to_figures(tex: str) -> tuple[str, list[str]]:
             filename = file_arg
         else:
             filename = _extract_special_filename(special)
+        if filename:
+            filename = _sanitize_graphics_ref(filename).strip().strip("\"'")
 
         fig_lines = [r"\begin{figure}[htbp]", r"\centering"]
         if filename:
@@ -624,6 +701,8 @@ def run_workflow(
     report.syntax_fixes.extend(frame_fixes)
     tex, qtr_fixes = normalize_qtr_frametitle(tex)
     report.syntax_fixes.extend(qtr_fixes)
+    tex, step_fixes = normalize_step_lists(tex)
+    report.syntax_fixes.extend(step_fixes)
     tex, vector_fixes, vector_warnings, created_pngs = convert_wmf_graphics_to_png(
         tex, options.project_dir
     )

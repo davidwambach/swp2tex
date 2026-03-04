@@ -21,6 +21,7 @@ The app checks bibliography setup, applies safe syntax fixes for common SWP issu
   - always removes SWP `tcilatex` includes (e.g. `\input{tcilatex.tex}`, `\input{styfolder/tcilatex.tex}`)
   - injects a compatibility shim for common `tcilatex` macros (including `\limfunc`, `\func`, `\QTR`, `\Qlb`, `\Qcb`, etc.)
   - converts SWP Beamer titles (`\QTR{frametitle}{...}` -> `\frametitle{...}`)
+  - converts `stepitemize` / `stepenumerate` to standard Beamer lists with `\item<+->` overlays
 - Build:
   - runs `latexmk -pdf -interaction=nonstopmode -halt-on-error`
   - returns build errors with LaTeX error context
@@ -55,6 +56,8 @@ python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
 pip install -e .[dev]
+# optional, enables in-window drag-and-drop in GUI
+pip install -e .[gui-dnd]
 ```
 
 ## Run (GUI)
@@ -70,8 +73,14 @@ In the UI, pick:
    - SWP to Overleaf
    - SWP to arXiv
 
-Each input row has an `Info` button for quick usage guidance.
+Each input row has a hover `i` info icon for quick usage guidance.
 The GUI shows a running status and progress bar while conversion/build is in progress.
+
+## Drag-and-Drop
+- If `tkinterdnd2` is installed (`pip install -e .[gui-dnd]`), the entire GUI window accepts drag-and-drop (window turns gray with drop message).
+- Drop a `.tex/.ltx` file to fill main input, a folder to fill project/resource directory, or a `.bib` file to fill optional bibliography input.
+- If it is not installed, the GUI still works normally via Browse.
+- Dropping a `.tex/.ltx` file on `swp2tex.exe` also prefills the main input on startup.
 
 ## Run (CLI)
 Overleaf export:
