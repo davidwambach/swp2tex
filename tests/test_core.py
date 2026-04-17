@@ -4,6 +4,7 @@ from swp2tex.core import (
     ERROR_MISSING_BBL_FOR_EXPORT,
     ERROR_MISSING_BIB,
     ERROR_WMF_CONVERT_FAILED,
+    NON_WINDOWS_WMF_WARNING_PREFIX,
     RunOptions,
     _normalize_tcilatex_inputs,
     _inject_tcilatex_compatibility,
@@ -229,6 +230,40 @@ def test_convert_wmf_graphics_to_png_rewrites_weird_relative_path_by_basename(
     assert created
 
 
+def test_convert_wmf_graphics_to_png_non_windows_uses_existing_alternative(
+    tmp_path: Path, monkeypatch
+) -> None:
+    (tmp_path / "graphs").mkdir()
+    wmf = tmp_path / "graphs" / "fig.wmf"
+    wmf.write_text("x", encoding="utf-8")
+    (tmp_path / "graphs" / "fig.png").write_text("png", encoding="utf-8")
+
+    monkeypatch.setattr("swp2tex.core.sys.platform", "darwin")
+    src = r"\includegraphics{graphs/fig.wmf}"
+    out, fixes, warnings, created = convert_wmf_graphics_to_png(src, tmp_path)
+    assert r"\includegraphics{graphs/fig.png}" in out
+    assert any("Used pre-converted image on non-Windows" in f for f in fixes)
+    assert not warnings
+    assert not created
+
+
+def test_convert_wmf_graphics_to_png_non_windows_warns_when_missing_alternative(
+    tmp_path: Path, monkeypatch
+) -> None:
+    (tmp_path / "graphs").mkdir()
+    wmf = tmp_path / "graphs" / "fig.wmf"
+    wmf.write_text("x", encoding="utf-8")
+
+    monkeypatch.setattr("swp2tex.core.sys.platform", "darwin")
+    src = r"\includegraphics{graphs/fig.wmf}"
+    out, fixes, warnings, created = convert_wmf_graphics_to_png(src, tmp_path)
+    assert out == src
+    assert not fixes
+    assert warnings
+    assert warnings[0].startswith(NON_WINDOWS_WMF_WARNING_PREFIX)
+    assert not created
+
+
 def test_comment_out_missing_includegraphics_warns() -> None:
     src = "\\begin{figure}\\n\\includegraphics{missing_figure3.jpg}\\n\\end{figure}\\n"
     out, fixes, warnings = comment_out_missing_includegraphics(src, Path("."))
@@ -310,6 +345,7 @@ def test_wmf_conversion_failure_reported(tmp_path: Path, monkeypatch) -> None:
     def fake_convert(src: Path):
         return False, "converter not found"
 
+    monkeypatch.setattr("swp2tex.core.sys.platform", "win32")
     monkeypatch.setattr("swp2tex.core._convert_vector_to_png", fake_convert)
 
     def fake_build(project_dir: Path, tex_path: Path):
@@ -326,6 +362,37 @@ def test_wmf_conversion_failure_reported(tmp_path: Path, monkeypatch) -> None:
     )
     assert ERROR_WMF_CONVERT_FAILED in report.error_codes
     assert any("Failed converting" in e for e in report.errors)
+
+
+def test_non_windows_wmf_warning_is_reported_as_warning_not_error(
+    tmp_path: Path, monkeypatch
+) -> None:
+    main = tmp_path / "main.tex"
+    main.write_text(
+        "\\bibliography{general}\n\\includegraphics{graphs/fig.wmf}\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "general.bib").write_text("@article{a,title={t}}\n", encoding="utf-8")
+    (tmp_path / "graphs").mkdir()
+    (tmp_path / "graphs" / "fig.wmf").write_text("x", encoding="utf-8")
+
+    monkeypatch.setattr("swp2tex.core.sys.platform", "darwin")
+
+    def fake_build(project_dir: Path, tex_path: Path):
+        return True, "ok"
+
+    monkeypatch.setattr("swp2tex.core.run_latex_build", fake_build)
+    report = run_workflow(
+        RunOptions(
+            main_file=main,
+            project_dir=tmp_path,
+            interactive=False,
+            export_mode="none",
+        )
+    )
+    assert report.build_status == "success"
+    assert ERROR_WMF_CONVERT_FAILED not in report.error_codes
+    assert any(w.startswith(NON_WINDOWS_WMF_WARNING_PREFIX) for w in report.warnings)
 
 
 def test_cleanup_tempfiles_after_failed_build(tmp_path: Path, monkeypatch) -> None:

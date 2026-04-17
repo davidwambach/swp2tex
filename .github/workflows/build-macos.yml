@@ -1,0 +1,65 @@
+name: Build macOS Binaries
+
+on:
+  workflow_dispatch:
+  release:
+    types: [published]
+
+jobs:
+  build-macos:
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[gui-dnd]"
+          pip install pyinstaller
+
+      - name: Build CLI binary
+        run: |
+          python -m PyInstaller \
+            --name swp2tex-cli \
+            --onefile \
+            --clean \
+            --noconfirm \
+            --paths src \
+            --add-data "src/swp2tex/assets:swp2tex/assets" \
+            launcher_cli.py
+
+      - name: Build GUI binary
+        run: |
+          python -m PyInstaller \
+            --name swp2tex \
+            --onefile \
+            --windowed \
+            --clean \
+            --noconfirm \
+            --paths src \
+            --add-data "src/swp2tex/assets:swp2tex/assets" \
+            launcher_gui.py
+
+      - name: Prepare artifact bundle
+        run: |
+          mkdir -p dist-macos
+          cp dist/swp2tex dist-macos/swp2tex
+          cp dist/swp2tex-cli dist-macos/swp2tex-cli
+          chmod +x dist-macos/swp2tex dist-macos/swp2tex-cli
+          tar -czf swp2tex-macos.tar.gz -C dist-macos .
+
+      - name: Upload macOS binaries artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: swp2tex-macos-binaries
+          path: |
+            dist-macos/swp2tex
+            dist-macos/swp2tex-cli
+            swp2tex-macos.tar.gz

@@ -26,6 +26,7 @@ The app checks bibliography setup, applies safe syntax fixes for common SWP issu
   - runs `latexmk -pdf -interaction=nonstopmode -halt-on-error`
   - returns build errors with LaTeX error context
   - converts `.wmf/.emf` graphics to `.png` via Windows GDI (PowerShell/.NET `System.Drawing`)
+  - on non-Windows systems (including macOS), WMF/EMF conversion is skipped with a clear warning; if a same-name pre-converted `.png/.pdf/.jpg/.jpeg` already exists, it is used automatically
   - if a referenced figure file is missing, comments out only the `\includegraphics` command in the normalized file and reports a warning in the UI
   - removes LaTeX temp artifacts after each run (`.aux`, `.fdb_latexmk`, `.fls`, `.log`, `.bbl`, `.blg`, ...)
 
@@ -120,6 +121,20 @@ python -m pytest -q
 Output:
 - `dist\swp2tex.exe` (GUI, double-click this)
 - `dist\swp2tex-cli.exe` (CLI)
+
+## Build macOS Binaries (From Windows)
+- You cannot build native macOS binaries on Windows directly.
+- This repo includes a GitHub Actions workflow at `.github/workflows/build-macos.yml`.
+
+How to use:
+1. Push your latest changes to GitHub.
+2. In GitHub, go to `Actions` -> `Build macOS Binaries` -> `Run workflow`.
+3. After it finishes, download artifact `swp2tex-macos-binaries`.
+
+Artifact contents:
+- `swp2tex` (GUI binary for macOS)
+- `swp2tex-cli` (CLI binary for macOS)
+- `swp2tex-macos.tar.gz` (bundle of both)
 
 ## License
 MIT. See `LICENSE`.

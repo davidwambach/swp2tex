@@ -19,6 +19,8 @@ ERROR_SUSPECT_SYNTAX = "SUSPECT_SYNTAX"
 ERROR_BUILD_FAILED = "BUILD_FAILED"
 ERROR_MISSING_BBL_FOR_EXPORT = "MISSING_BBL_FOR_EXPORT"
 ERROR_WMF_CONVERT_FAILED = "WMF_CONVERT_FAILED"
+NON_WINDOWS_WMF_WARNING_PREFIX = "WMF/EMF conversion skipped on non-Windows"
+NON_WINDOWS_WMF_ALT_SUFFIXES = (".png", ".pdf", ".jpg", ".jpeg")
 
 
 @dataclass
@@ -259,12 +261,23 @@ def _convert_vector_to_png(src: Path) -> tuple[bool, str]:
     return _convert_vector_with_windows_gdi(src)
 
 
+def _find_existing_vector_alternative(
+    vector_path: Path,
+) -> Path | None:
+    for suffix in NON_WINDOWS_WMF_ALT_SUFFIXES:
+        candidate = vector_path.with_suffix(suffix)
+        if candidate.exists():
+            return candidate
+    return None
+
+
 def convert_wmf_graphics_to_png(
     tex: str, project_dir: Path
 ) -> tuple[str, list[str], list[str], list[Path]]:
     fixes: list[str] = []
     warnings: list[str] = []
     created_pngs: list[Path] = []
+    warned_non_windows: set[Path] = set()
     pattern = re.compile(r"(\\includegraphics(?:\[[^\]]*\])?\{)([^}]+)(\})")
 
     def repl(match: re.Match[str]) -> str:
@@ -277,6 +290,32 @@ def convert_wmf_graphics_to_png(
         if resolved is None:
             return match.group(0)
         if resolved.suffix.lower() not in {".wmf", ".emf"}:
+            return match.group(0)
+
+        # On non-Windows platforms, we cannot use the built-in GDI converter.
+        if sys.platform != "win32":
+            alt = _find_existing_vector_alternative(resolved)
+            if alt is not None:
+                try:
+                    rel_alt = alt.relative_to(project_dir).as_posix()
+                except ValueError:
+                    rel_alt = alt.name
+                fixes.append(
+                    f"Used pre-converted image on non-Windows: {resolved} -> {rel_alt}"
+                )
+                return prefix + rel_alt + suffix
+            if resolved not in warned_non_windows:
+                platform_label = "macOS" if sys.platform == "darwin" else sys.platform
+                suggestions = ", ".join(
+                    str(resolved.with_suffix(sfx).name)
+                    for sfx in NON_WINDOWS_WMF_ALT_SUFFIXES
+                )
+                warnings.append(
+                    f"{NON_WINDOWS_WMF_WARNING_PREFIX}: {resolved}. "
+                    f"Platform: {platform_label}. "
+                    f"Please pre-convert this file to one of: {suggestions}."
+                )
+                warned_non_windows.add(resolved)
             return match.group(0)
 
         png_path = resolved.with_suffix(".png")
@@ -708,8 +747,17 @@ def run_workflow(
     )
     report.syntax_fixes.extend(vector_fixes)
     if vector_warnings:
-        report.error_codes.append(ERROR_WMF_CONVERT_FAILED)
-        report.errors.extend(vector_warnings)
+        non_windows_warnings = [
+            w for w in vector_warnings if w.startswith(NON_WINDOWS_WMF_WARNING_PREFIX)
+        ]
+        conversion_failures = [
+            w for w in vector_warnings if not w.startswith(NON_WINDOWS_WMF_WARNING_PREFIX)
+        ]
+        if non_windows_warnings:
+            report.warnings.extend(non_windows_warnings)
+        if conversion_failures:
+            report.error_codes.append(ERROR_WMF_CONVERT_FAILED)
+            report.errors.extend(conversion_failures)
     tex, missing_fig_fixes, missing_fig_warnings = comment_out_missing_includegraphics(
         tex, options.project_dir
     )
