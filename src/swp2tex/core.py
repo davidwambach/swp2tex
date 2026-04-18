@@ -453,6 +453,84 @@ def normalize_step_lists(tex: str) -> tuple[str, list[str]]:
     return "".join(out), fixes
 
 
+def normalize_display_math_operators(tex: str) -> tuple[str, list[str]]:
+    fixes: list[str] = []
+    counts = {"dint": 0, "dsum": 0}
+    pattern = re.compile(r"\\(dint|dsum)\b")
+    out: list[str] = []
+    i = 0
+    for match in pattern.finditer(tex):
+        start, end = match.span()
+        out.append(tex[i:start])
+        i = end
+        if _is_pos_in_latex_comment(tex, start):
+            out.append(match.group(0))
+            continue
+        op = match.group(1)
+        if op == "dint":
+            out.append(r"\int")
+            counts["dint"] += 1
+        else:
+            out.append(r"\sum")
+            counts["dsum"] += 1
+    out.append(tex[i:])
+    if counts["dint"]:
+        fixes.append(
+            f"Normalized \\dint to \\int ({counts['dint']} occurrence(s))."
+        )
+    if counts["dsum"]:
+        fixes.append(
+            f"Normalized \\dsum to \\sum ({counts['dsum']} occurrence(s))."
+        )
+    return "".join(out), fixes
+
+
+def _is_pos_inside_environment(tex: str, pos: int, env_name: str) -> bool:
+    token_pattern = re.compile(
+        rf"\\begin\s*\{{{re.escape(env_name)}\}}|\\end\s*\{{{re.escape(env_name)}\}}"
+    )
+    depth = 0
+    for match in token_pattern.finditer(tex, 0, pos):
+        if _is_pos_in_latex_comment(tex, match.start()):
+            continue
+        token = match.group(0)
+        if token.lstrip().startswith(r"\begin"):
+            depth += 1
+        elif depth > 0:
+            depth -= 1
+    return depth > 0
+
+
+def normalize_extra_center_blocks_for_beamer(tex: str) -> tuple[str, list[str]]:
+    fixes: list[str] = []
+    pattern = re.compile(r"\\begin\s*\{center\}.*?\\end\s*\{center\}", re.DOTALL)
+    out: list[str] = []
+    i = 0
+    converted_count = 0
+    for match in pattern.finditer(tex):
+        start, end = match.span()
+        out.append(tex[i:start])
+        i = end
+        block = match.group(0)
+        if _is_pos_in_latex_comment(tex, start):
+            out.append(block)
+            continue
+        if r"\Extra" not in block:
+            out.append(block)
+            continue
+        if _is_pos_inside_environment(tex, start, "frame"):
+            out.append(block)
+            continue
+        converted_count += 1
+        out.append(r"\begin{frame}[plain]" + "\n" + block + "\n" + r"\end{frame}")
+    out.append(tex[i:])
+    if converted_count:
+        fixes.append(
+            f"Wrapped {converted_count} center block(s) with \\Extra into beamer frame(s)."
+        )
+    return "".join(out), fixes
+
+
 def _strip_wrapper(raw: str, macro_name: str) -> str:
     cleaned = re.sub(r"(?<!\\)%[^\n]*", "", raw).strip()
     pattern = re.compile(rf"\\{macro_name}\s*\{{(.*)\}}", re.DOTALL)
@@ -593,6 +671,7 @@ TCILATEX_COMPAT_BLOCK = r"""
 % SWP TCILATEX COMPATIBILITY SHIM
 \providecommand{\func}[1]{\mathop{\mathrm{#1}}}
 \providecommand{\limfunc}[1]{\mathop{\mathrm{#1}}}
+\providecommand{\Extra}{\Large}
 \providecommand{\QTR}[2]{{\csname #1\endcsname #2}}
 \providecommand{\QTP}[1]{}
 \providecommand{\QEXCLUDE}[1]{}
@@ -742,6 +821,10 @@ def run_workflow(
     report.syntax_fixes.extend(qtr_fixes)
     tex, step_fixes = normalize_step_lists(tex)
     report.syntax_fixes.extend(step_fixes)
+    tex, display_op_fixes = normalize_display_math_operators(tex)
+    report.syntax_fixes.extend(display_op_fixes)
+    tex, extra_center_fixes = normalize_extra_center_blocks_for_beamer(tex)
+    report.syntax_fixes.extend(extra_center_fixes)
     tex, vector_fixes, vector_warnings, created_pngs = convert_wmf_graphics_to_png(
         tex, options.project_dir
     )
@@ -919,11 +1002,34 @@ def run_workflow(
             for item in cleanup_failures:
                 report.warnings.append(f"Could not delete temporary file: {item}")
         if options.export_mode in {"overleaf", "arxiv"}:
-            unlink_error = _safe_unlink(normalized)
-            if unlink_error:
-                report.warnings.append(
-                    f"Could not delete normalized file {normalized.name}: {unlink_error}"
+            if report.build_status == "failed":
+                broken_path = normalized.with_name(
+                    f"{normalized.stem} (broken){normalized.suffix}"
                 )
+                if normalized.exists():
+                    replace_error = _safe_unlink(broken_path)
+                    if replace_error:
+                        report.warnings.append(
+                            f"Could not replace prior broken file {broken_path.name}: "
+                            f"{replace_error}"
+                        )
+                    try:
+                        normalized.rename(broken_path)
+                        report.normalized_tex_path = str(broken_path)
+                        report.warnings.append(
+                            f"Build failed; kept generated file as {broken_path.name}."
+                        )
+                    except OSError as exc:
+                        report.warnings.append(
+                            f"Build failed; could not rename {normalized.name} to "
+                            f"{broken_path.name}: {exc}"
+                        )
+            else:
+                unlink_error = _safe_unlink(normalized)
+                if unlink_error:
+                    report.warnings.append(
+                        f"Could not delete normalized file {normalized.name}: {unlink_error}"
+                    )
         if options.export_mode == "overleaf":
             for created in created_pngs:
                 unlink_error = _safe_unlink(created)

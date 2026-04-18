@@ -14,6 +14,8 @@ from swp2tex.core import (
     convert_swp_frames_to_figures,
     normalize_qtr_frametitle,
     normalize_step_lists,
+    normalize_display_math_operators,
+    normalize_extra_center_blocks_for_beamer,
     normalize_bibliography_commands,
     run_workflow,
 )
@@ -115,6 +117,7 @@ def test_inject_tcilatex_compatibility_contains_limfunc() -> None:
     src = r"\documentclass{article}\begin{document}x\end{document}"
     out, fixes = _inject_tcilatex_compatibility(src)
     assert r"\providecommand{\limfunc}[1]{\mathop{\mathrm{#1}}}" in out
+    assert r"\providecommand{\Extra}{\Large}" in out
     assert out.index(r"\providecommand{\limfunc}") < out.index(r"\begin{document}")
     assert fixes
 
@@ -332,6 +335,57 @@ def test_commented_step_list_not_converted() -> None:
     assert not fixes
 
 
+def test_normalize_display_math_operators_dint_and_dsum() -> None:
+    src = r"\dint\limits_0^1 f(x)\,dx + \dsum\limits_{i=1}^n a_i + \dint x + \dsum y"
+    out, fixes = normalize_display_math_operators(src)
+    assert r"\int\limits_0^1" in out
+    assert r"\sum\limits_{i=1}^n" in out
+    assert r"\int x" in out
+    assert r"\sum y" in out
+    assert r"\dint" not in out
+    assert r"\dsum" not in out
+    assert fixes
+
+
+def test_normalize_display_math_operators_skips_comments() -> None:
+    src = r"% \dint\limits_0^1" + "\n" + r"\dint z"
+    out, fixes = normalize_display_math_operators(src)
+    assert r"% \dint\limits_0^1" in out
+    assert r"\int z" in out
+    assert fixes
+
+
+def test_normalize_extra_center_block_outside_frame_is_wrapped() -> None:
+    src = (
+        "\\end{frame}%\n"
+        "%EndExpansion\n\n"
+        "\\begin{center}\n"
+        "\\color{red}{\\Extra Slides}\\color{black}\n"
+        "\\end{center}\n\n"
+        "%TCIMACRO{\\TeXButton{BeginFrame}{\\begin{frame}}}%\n"
+        "%BeginExpansion\n"
+        "\\begin{frame}%\n"
+    )
+    out, fixes = normalize_extra_center_blocks_for_beamer(src)
+    assert "\\begin{frame}[plain]" in out
+    assert "\\color{red}{\\Extra Slides}\\color{black}" in out
+    assert "\\end{frame}" in out
+    assert fixes
+
+
+def test_normalize_extra_center_block_inside_frame_not_wrapped() -> None:
+    src = (
+        "\\begin{frame}\n"
+        "\\begin{center}\n"
+        "\\color{red}{\\Extra Slides}\\color{black}\n"
+        "\\end{center}\n"
+        "\\end{frame}\n"
+    )
+    out, fixes = normalize_extra_center_blocks_for_beamer(src)
+    assert out == src
+    assert not fixes
+
+
 def test_wmf_conversion_failure_reported(tmp_path: Path, monkeypatch) -> None:
     main = tmp_path / "main.tex"
     main.write_text(
@@ -456,6 +510,32 @@ def test_cleanup_tempfiles_in_project_dir_when_dirs_differ(
     assert report.build_status == "failed"
     for suffix in (".aux", ".fdb_latexmk", ".fls", ".log", ".bbl", ".blg", ".snm", ".nav"):
         assert not (proj_dir / f"main_tex{suffix}").exists()
+
+
+def test_failed_export_build_keeps_broken_tex_file(tmp_path: Path, monkeypatch) -> None:
+    main = tmp_path / "main.tex"
+    main.write_text("\\bibliography{general}\n", encoding="utf-8")
+    (tmp_path / "general.bib").write_text("@article{a,title={t}}\n", encoding="utf-8")
+
+    def fake_build(project_dir: Path, tex_path: Path):
+        return False, "! LaTeX Error"
+
+    monkeypatch.setattr("swp2tex.core.run_latex_build", fake_build)
+
+    report = run_workflow(
+        RunOptions(
+            main_file=main,
+            project_dir=tmp_path,
+            interactive=False,
+            export_mode="overleaf",
+        )
+    )
+
+    assert report.build_status == "failed"
+    assert not (tmp_path / "main_tex.tex").exists()
+    broken = tmp_path / "main_tex (broken).tex"
+    assert broken.exists()
+    assert report.normalized_tex_path == str(broken)
 
 
 def test_export_requires_bbl(tmp_path: Path, monkeypatch) -> None:
