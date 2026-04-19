@@ -1,11 +1,15 @@
 from pathlib import Path
+from datetime import datetime, timedelta, timezone
 
 from swp2tex.gui import (
     extract_drop_targets,
+    is_newer_version,
     parse_dnd_file_list,
+    parse_version_parts,
     select_bib_from_drop_payload,
     select_main_tex_from_drop_payload,
     select_project_dir_from_drop_payload,
+    should_run_auto_update_check,
 )
 
 
@@ -63,3 +67,37 @@ def test_extract_drop_targets_populates_main_project_and_bib(tmp_path: Path) -> 
     assert main_sel == tex
     assert project_sel == project
     assert bib_sel == bib
+
+
+def test_parse_version_parts_handles_v_prefix() -> None:
+    assert parse_version_parts("v0.1.3") == [0, 1, 3]
+
+
+def test_is_newer_version_true_for_higher_patch() -> None:
+    assert is_newer_version("v0.1.4", "0.1.3")
+
+
+def test_is_newer_version_false_for_same_version() -> None:
+    assert not is_newer_version("0.1.3", "v0.1.3")
+
+
+def test_should_run_auto_update_check_weekly_true_after_7_days() -> None:
+    now = datetime(2026, 4, 19, tzinfo=timezone.utc)
+    last = (now - timedelta(days=7, minutes=1)).isoformat()
+    assert should_run_auto_update_check("weekly", last, now)
+
+
+def test_should_run_auto_update_check_weekly_false_before_7_days() -> None:
+    now = datetime(2026, 4, 19, tzinfo=timezone.utc)
+    last = (now - timedelta(days=6, hours=23)).isoformat()
+    assert not should_run_auto_update_check("weekly", last, now)
+
+
+def test_should_run_auto_update_check_startup_true() -> None:
+    now = datetime(2026, 4, 19, tzinfo=timezone.utc)
+    assert should_run_auto_update_check("startup", "", now)
+
+
+def test_should_run_auto_update_check_off_false() -> None:
+    now = datetime(2026, 4, 19, tzinfo=timezone.utc)
+    assert not should_run_auto_update_check("off", "", now)

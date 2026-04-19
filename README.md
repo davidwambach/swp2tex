@@ -77,6 +77,14 @@ In the UI, pick:
 Each input row has a hover `i` info icon for quick usage guidance.
 The GUI shows a running status and progress bar while conversion/build is in progress.
 
+### Update Checks
+- Manual: click `Check for updates` in the `Updates` section.
+- Auto-check modes:
+  - `Off`
+  - `On startup` (checks each app launch)
+  - `Weekly` (checks at most once every 7 days)
+- If a newer GitHub release tag is found, the app prompts to open the release page.
+
 ## Drag-and-Drop
 - If `tkinterdnd2` is installed (`pip install -e .[gui-dnd]`), the entire GUI window accepts drag-and-drop (window turns gray with drop message).
 - Drop a `.tex/.ltx` file to fill main input, a folder to fill project/resource directory, or a `.bib` file to fill optional bibliography input.
@@ -112,6 +120,37 @@ swp2tex-bib run --main C:\path\main.ltx --project-dir C:\path\project --export-m
 ```powershell
 python -m pytest -q
 ```
+
+## Release Automation
+Use the included script to bump version metadata consistently:
+
+```powershell
+.\release.ps1 -Version 0.1.4
+```
+
+Optional workflow in one command:
+
+```powershell
+.\release.ps1 -Version 0.1.4 -All
+```
+
+`-All` runs tests, builds EXEs, commits, tags, and pushes.
+By default, the release commit stages **all current changes** (`git add -A`).
+You can also run parts selectively via:
+- `-RunTests`
+- `-BuildExe`
+- `-Commit`
+- `-Tag`
+- `-Push`
+- `-VersionFilesOnly` (commit only `pyproject.toml` and `src/swp2tex/__init__.py`)
+
+Optional custom commit message:
+
+```powershell
+.\release.ps1 -Version 0.1.4 -Commit -CommitMessage "release: {tag}"
+```
+
+`{version}` and `{tag}` placeholders are supported in `-CommitMessage`.
 
 ## Build Windows EXE
 ```powershell

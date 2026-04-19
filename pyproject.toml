@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "swp2tex-bib"
-version = "0.1.0"
+version = "0.1.4"
 description = "Bibliography-focused SWP LaTeX checker, builder, and arXiv exporter."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -28,3 +28,4 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 swp2tex = ["assets/*.bst"]
+
